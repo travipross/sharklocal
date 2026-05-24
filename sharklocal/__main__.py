@@ -33,7 +33,8 @@ def print_status(status: VacuumStatus, prefix: str = "[STATUS]"):
     """Helper to format status output."""
     bat = f"{status.battery_level}%" if status.battery_level is not None else "N/A"
     chg = f" (Charging)" if status.charging else ""
-    print(f"\r{prefix} Mode: {status.mode:20} | Battery: {bat}{chg}", end="", flush=True)
+    mode_str = status.mode.value if hasattr(status.mode, "value") else str(status.mode)
+    print(f"\r{prefix} Mode: {mode_str:20} | Battery: {bat}{chg}", end="", flush=True)
 
 async def run_command(host: str, cmd: str, transport: str):
     """Execute a single specific command."""
@@ -109,7 +110,7 @@ async def run_probe(host: str):
         except Exception as e:
             print(f"\nError: {e}")
 
-async def test_vacuum_logic(host: str, test_commands: bool = False) -> Dict[str, Any]:
+async def run_test_logic(host: str, test_commands: bool = False) -> Dict[str, Any]:
     """Run compatibility suite and return structured results for reporting."""
     print(f"\n>>> TESTING: {host}")
     
@@ -284,9 +285,23 @@ def generate_markdown_report(results: Dict[str, Any]) -> str:
     for label, mode in modes:
         report += f"| {label} | {check_mode('rest', mode)} | {check_mode('mqtt', mode)} | {get_maps(mode, is_mode=True)} |\n"
 
+    # Known Issues notes
+    has_rest = any(any(v for v in m["actions"].values()) for m in results["rest"].values())
+    has_mqtt = any(any(v for v in m["actions"].values()) for m in results["mqtt"].values())
+    
+    if not has_rest or not has_mqtt:
+        report += "\n---\n\n## Known Issues / Notes\n"
+        if not has_rest and not has_mqtt:
+            report += "- **Local Control Disabled:** Both REST and MQTT ports appear locked down or unreachable.\n"
+        elif not has_rest:
+            report += "- **REST API:** Local REST API (Ports 443/80) is closed or non-responsive.\n"
+        elif not has_mqtt:
+            report += "- **MQTT:** Local MQTT broker (Port 1883) is closed or unreachable.\n"
+
     return report
 
-def main():
+def setup_argparse() -> argparse.ArgumentParser:
+    """Configure and return the argument parser."""
     parser = argparse.ArgumentParser(prog="sharklocal", description="SharkLocal CLI Utility")
     parser.add_argument("host", help="IP address of the vacuum")
     parser.add_argument("--cmd", choices=VALID_COMMANDS, help="Execute a specific command")
@@ -296,7 +311,24 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run non-destructive compatibility tests")
     parser.add_argument("--test-all", action="store_true", help="Run all compatibility tests, including destructive commands")
     parser.add_argument("--save-report", nargs='?', const=True, help="Save result to a markdown compatibility report (optional: filepath)")
+    return parser
+
+def save_report(results: Dict[str, Any], save_report_arg: Any):
+    """Generate and save the markdown report."""
+    report_md = generate_markdown_report(results)
     
+    if isinstance(save_report_arg, str):
+        filename = save_report_arg
+    else:
+        model_name = results["model"] or f"unknown_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        filename = f"{model_name}.md"
+    
+    with open(filename, "w") as f:
+        f.write(report_md)
+    print(f"\nReport saved to: {os.path.abspath(filename)}")
+
+def main():
+    parser = setup_argparse()
     args = parser.parse_args()
 
     print("SharkLocal CLI Utility")
@@ -310,20 +342,9 @@ def main():
         elif args.cmd:
             asyncio.run(run_command(args.host, args.cmd, args.transport))
         elif args.test or args.test_all or args.save_report:
-            results = asyncio.run(test_vacuum_logic(args.host, test_commands=args.test_all))
-            
+            results = asyncio.run(run_test_logic(args.host, test_commands=args.test_all))
             if args.save_report:
-                report_md = generate_markdown_report(results)
-                
-                if isinstance(args.save_report, str):
-                    filename = args.save_report
-                else:
-                    model_name = results["model"] or f"unknown_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    filename = f"{model_name}.md"
-                
-                with open(filename, "w") as f:
-                    f.write(report_md)
-                print(f"\nReport saved to: {os.path.abspath(filename)}")
+                save_report(results, args.save_report)
         else:
             parser.print_help()
     except KeyboardInterrupt:
@@ -331,6 +352,8 @@ def main():
     except Exception as e:
         print(f"\nFATAL: {e}")
         sys.exit(1)
+        
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()
