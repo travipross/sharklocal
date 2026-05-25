@@ -99,7 +99,7 @@ See [docs/mappings.md](docs/mappings.md) for the full feature comparison table, 
 
 ## Compatibility
 
-Not all vacuum models support both transports, and feature coverage varies by model. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the list of known models and links to per-model compatibility matrices.
+Not all vacuum models support both transports, and feature coverage varies by model. See [docs/compatibility.md](docs/compatibility.md) for the list of known models and links to per-model compatibility matrices.
 
 ---
 
